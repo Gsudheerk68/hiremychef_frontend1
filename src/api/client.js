@@ -8,7 +8,7 @@ import axios from 'axios'
  */
 export const MODE = String(import.meta.env.VITE_USE_MOCK ?? 'true')
 export const USE_MOCK = MODE === 'true'
-const LIVE_IN_HYBRID = new Set(['auth', 'chefs', 'admin.chefs', 'admin.users'])
+const LIVE_IN_HYBRID = new Set(['auth', 'chefs', 'admin.chefs', 'admin.users', 'bookings', 'reviews'])
 export const isMock = (domain) => MODE === 'true' || (MODE === 'hybrid' && !LIVE_IN_HYBRID.has(domain))
 export const TOKEN_KEY = 'hmc_token'
 const api = axios.create({ baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1', timeout: 15000 })
