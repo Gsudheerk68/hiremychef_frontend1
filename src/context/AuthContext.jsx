@@ -15,5 +15,7 @@ export function AuthProvider({ children }) {
   }
   const login = async (body) => persist(await authService.login(body))
   const register = async (body) => persist(await authService.register(body))
-  return <Ctx.Provider value={{ user, login, register, logout, isAuthenticated: !!user }}>{children}</Ctx.Provider>
+  // used by "Continue with Google": the backend already returned { token, user }, so just start the session
+  const loginWithResult = async (result) => persist(result)
+  return <Ctx.Provider value={{ user, login, register, loginWithResult, logout, isAuthenticated: !!user }}>{children}</Ctx.Provider>
 }

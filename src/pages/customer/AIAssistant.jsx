@@ -14,6 +14,8 @@ import { inr } from '../../utils/format'
 
 const IDEAS = ['South Indian chef for 10 people in Nellore, budget ₹5000', 'Biryani for a birthday party, 25 guests in Hyderabad', 'Vegetarian family dinner in Vijayawada under ₹3000']
 const HELLO = { from: 'ai', text: 'Hi! Describe your event in plain language: cuisine, city, number of guests and budget. I will find the best chefs, and I can send a booking request for you once you confirm.' }
+const PLACEHOLDER = { from: 'ai', text: '', streaming: true }
+const FALLBACK_TEXT = 'Sorry, I could not process that. Please try again.'
 
 function ConfirmCard({ p, busy, onAnswer }) {
   return <div className="max-w-[92%] space-y-3 rounded-2xl border border-brand-600 bg-white px-4 py-4 text-sm shadow-soft" role="group" aria-label="Confirm booking">
@@ -53,32 +55,56 @@ function ChefResult({ c }) {
     </div></div>
 }
 
+// A saved chat may contain an unfinished streaming bubble if the page was left mid-reply: clean it up.
+const restoreMsgs = () => {
+  const saved = aiService.loadChat()?.msgs
+  if (!saved) return [HELLO]
+  return saved.filter((m) => !(m.streaming && !m.text && !m.chefs?.length)).map((m) => ({ ...m, streaming: false }))
+}
+
 function Finder() {
-  const toast = useToast(); const [msgs, setMsgs] = useState([HELLO]); const [text, setText] = useState(''); const [busy, setBusy] = useState(false); const [pending, setPending] = useState(null); const end = useRef(null)
-  useEffect(() => { end.current?.scrollIntoView({ block: 'end' }) }, [msgs.length, busy, pending])
-  const handle = (r) => { setMsgs((m) => [...m, { from: 'ai', text: r.reply, chefs: r.chefs, rankedBy: r.rankedBy }]); setPending(r.pending || null) }
-  const fail = (e) => { toast(e.message, 'error'); setMsgs((m) => [...m, { from: 'ai', text: 'Sorry, I could not process that. Please try again.' }]) }
-  const ask = async (q) => {
+  const toast = useToast()
+  const [msgs, setMsgs] = useState(restoreMsgs)
+  const [pending, setPending] = useState(() => aiService.loadChat()?.pending || null)
+  const [text, setText] = useState(''); const [busy, setBusy] = useState(false); const [status, setStatus] = useState('Thinking…'); const end = useRef(null)
+  useEffect(() => { end.current?.scrollIntoView({ block: 'end' }) }, [msgs, busy, pending])
+  useEffect(() => { if (!busy) aiService.saveChat(msgs, pending) }, [msgs, pending, busy])
+
+  const patchLast = (fn) => setMsgs((m) => m.map((x, i) => (i === m.length - 1 ? fn(x) : x)))
+  const onEvent = (event, d) => {
+    if (event === 'status') setStatus(d.text)
+    else if (event === 'token') patchLast((x) => ({ ...x, text: x.text + d.text }))
+    else if (event === 'reset') patchLast((x) => ({ ...x, text: '' }))
+    else if (event === 'chefs') patchLast((x) => ({ ...x, chefs: d.chefs, rankedBy: d.ranked_by }))
+  }
+  const run = async (userText, start) => {
+    setMsgs((m) => [...m, { from: 'me', text: userText }, PLACEHOLDER]); setStatus('Thinking…'); setBusy(true)
+    try {
+      const r = await start(onEvent)
+      patchLast((x) => ({ ...x, text: r.reply, chefs: r.chefs, rankedBy: r.rankedBy, streaming: false }))
+      setPending(r.pending || null)
+    } catch (e) {
+      toast(e.message, 'error')
+      patchLast((x) => ({ ...x, text: x.text || FALLBACK_TEXT, streaming: false }))
+    } finally { setBusy(false) }
+  }
+  const ask = (q) => {
     const message = (q ?? text).trim(); if (!message || busy || pending) return
-    setMsgs((m) => [...m, { from: 'me', text: message }]); setText(''); setBusy(true)
-    try { handle(await aiService.chat(message)) } catch (e) { fail(e) } finally { setBusy(false) }
+    setText(''); run(message, (on) => aiService.chatStream(message, on))
   }
-  const answer = async (yes) => {
-    if (busy) return
-    setMsgs((m) => [...m, { from: 'me', text: yes ? 'Yes, confirm the booking.' : 'Cancel.' }]); setBusy(true)
-    try { handle(await aiService.confirm(yes)) } catch (e) { fail(e) } finally { setBusy(false) }
-  }
+  const answer = (yes) => { if (!busy) run(yes ? 'Yes, confirm the booking.' : 'Cancel.', (on) => aiService.confirmStream(yes, on)) }
   const restart = () => { if (busy) return; aiService.reset(); setMsgs([HELLO]); setPending(null); setText('') }
+
   return <div className="card flex flex-col">
     <div className="flex items-center justify-end border-b border-cream-200 px-4 py-2">
       <button onClick={restart} disabled={busy} className="flex items-center gap-1.5 text-xs font-medium text-ink-700 hover:text-brand-600 disabled:opacity-50"><RotateCcw className="h-3.5 w-3.5" />New chat</button></div>
     <div className="max-h-[32rem] min-h-[20rem] flex-1 space-y-4 overflow-y-auto p-5" aria-live="polite">
-      {msgs.map((m, i) => <div key={i} className={m.from === 'me' ? 'flex justify-end' : ''}><div className={`max-w-[92%] space-y-3 rounded-2xl px-4 py-3 text-sm ${m.from === 'me' ? 'bg-brand-600 text-white' : 'bg-cream-100'}`}>
-        <p className="whitespace-pre-line">{m.text}</p>
+      {msgs.map((m, i) => (m.streaming && !m.text && !m.chefs?.length) ? null : <div key={i} className={m.from === 'me' ? 'flex justify-end' : ''}><div className={`max-w-[92%] space-y-3 rounded-2xl px-4 py-3 text-sm ${m.from === 'me' ? 'bg-brand-600 text-white' : 'bg-cream-100'}`}>
+        {(m.text || m.streaming) && <p className="whitespace-pre-line">{m.text}{m.streaming && <span className="animate-pulse">▍</span>}</p>}
         {m.chefs?.length > 0 && <p className="flex items-center gap-1.5 text-xs font-medium text-ink-700"><Sparkles className="h-3.5 w-3.5 text-brand-600" />{m.rankedBy === 'ml' ? 'Ranked by our machine-learning model (LightGBM)' : 'Ranked by our scoring rules'}</p>}
         {m.chefs?.map((c) => <ChefResult key={c.id} c={c} />)}</div></div>)}
       {pending && <ConfirmCard p={pending} busy={busy} onAnswer={answer} />}
-      {busy && <div className="flex items-center gap-2 text-sm text-ink-700"><Loader2 className="h-4 w-4 animate-spin" />Thinking… this can take up to a minute.</div>}<div ref={end} /></div>
+      {busy && !msgs[msgs.length - 1]?.text && <div className="flex items-center gap-2 text-sm text-ink-700"><Loader2 className="h-4 w-4 animate-spin" />{status}</div>}<div ref={end} /></div>
     <div className="border-t border-cream-200 p-4">
       {msgs.length === 1 && <div className="mb-3 flex flex-wrap gap-2">{IDEAS.map((i) => <button key={i} onClick={() => ask(i)} className="rounded-full border border-cream-200 bg-white px-3 py-1.5 text-xs font-medium hover:border-brand-600">{i}</button>)}</div>}
       <form onSubmit={(e) => { e.preventDefault(); ask() }} className="flex gap-2"><input value={text} onChange={(e) => setText(e.target.value)} maxLength={500} disabled={!!pending} aria-label="Describe your event" placeholder={pending ? 'Please confirm or cancel the booking above' : 'e.g. Italian dinner for 8 in Bengaluru, ₹6000'} className="flex-1 rounded-xl border border-cream-200 px-3 py-2.5 text-sm disabled:bg-cream-100" />

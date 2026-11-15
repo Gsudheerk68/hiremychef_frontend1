@@ -4,12 +4,13 @@ import { Mail, Lock, User, Phone, MapPin, Briefcase, UtensilsCrossed } from 'luc
 import AuthCard from '../../components/common/AuthCard'
 import Input from '../../components/common/Input'
 import Button from '../../components/common/Button'
+import GoogleSignIn from '../../components/common/GoogleSignIn'
 import { useAuth, dashboardPath } from '../../context/AuthContext'
 import { useToast } from '../../context/ToastContext'
 import { isEmail, validatePassword } from '../../utils/validators'
 const init = { role:'customer', full_name:'', email:'', phone:'', password:'', confirm:'', city:'', cuisines:'', years_experience:'' }
 export default function Register() {
-  const { register } = useAuth(); const nav = useNavigate(); const toast = useToast()
+  const { register, loginWithResult } = useAuth(); const nav = useNavigate(); const toast = useToast()
   const [f, setF] = useState(init); const [err, setErr] = useState({}); const [busy, setBusy] = useState(false)
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value })
   const submit = async (e) => {
@@ -26,6 +27,11 @@ export default function Register() {
     if (f.role === 'chef') Object.assign(body, { city:f.city.trim(), cuisines:f.cuisines.split(',').map((c) => c.trim()).filter(Boolean), years_experience:Number(f.years_experience) || 0 })
     try { const u = await register(body); toast('Account created. Welcome!'); nav(dashboardPath(u.role)) }
     catch (x) { toast(x.message, 'error') } finally { setBusy(false) }
+  }
+  const googleSession = async (result) => {
+    const u = await loginWithResult(result)
+    toast(result.is_new ? 'Account created. Welcome!' : `Welcome back, ${u.name}!`)
+    nav(dashboardPath(u.role))
   }
   return <AuthCard wide title="Create your account" text="Join as a customer to book chefs, or as a chef to grow your business.">
     <form onSubmit={submit} className="space-y-4" noValidate>
@@ -44,6 +50,7 @@ export default function Register() {
           <p className="rounded-xl bg-amber-50 p-3 text-xs text-amber-800 sm:col-span-2">Chef accounts are reviewed by our team before your profile is listed publicly.</p></>}
       </div>
       <Button type="submit" loading={busy} className="w-full">Create account</Button>
+      <GoogleSignIn onSession={googleSession} />
       <p className="text-center text-sm text-ink-700">Already registered? <Link to="/login" className="font-semibold text-brand-600">Log in</Link></p>
     </form></AuthCard>
 }
