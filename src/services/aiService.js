@@ -42,8 +42,29 @@ function mockMenu({ cuisine, guests = 10, diet = 'any', budget }) {
   if (budget && perHead * guests > budget) tips.push('This menu may exceed your budget. Drop one starter or one dessert to save roughly 15%.')
   return { title: `${cuisine} menu for ${guests} guests`, diet, courses, estimated_cost_per_head: perHead, tips }
 }
+/** Converts POST /ai/recommend into the { reply, chefs } shape AIAssistant.jsx already renders. */
+const THREAD_KEY = 'hmc_chat_thread'
+const CHAT_TIMEOUT = 300000 // local LLMs on CPU can take a few minutes
+
+/** Maps POST /ai/chat and /ai/chat/confirm to { reply, chefs, pending }. */
+function fromChat(res) {
+  if (res.thread_id) sessionStorage.setItem(THREAD_KEY, res.thread_id)
+  return { reply: res.reply, chefs: [], pending: res.pending_confirmation || null }
+}
+
 export const aiService = {
-  chat: (message) => isMock('ai') ? mockChat(message).then((r) => mock(r, 600)) : api.post('/ai/chat', { message }),
-  menu: (params) => isMock('ai') ? mock(mockMenu(params), 700) : api.post('/ai/menu', params),
+  chat: (message) => {
+    if (isMock('ai.chat')) return mockChat(message).then((r) => mock(r, 600))
+    const thread_id = sessionStorage.getItem(THREAD_KEY) || undefined
+    return api.post('/ai/chat', { message, thread_id }, { timeout: CHAT_TIMEOUT }).then(fromChat)
+  },
+  // answer a pending booking confirmation (true = book it, false = cancel)
+  confirm: (confirm) => {
+    const thread_id = sessionStorage.getItem(THREAD_KEY)
+    return api.post('/ai/chat/confirm', { thread_id, confirm }, { timeout: CHAT_TIMEOUT }).then(fromChat)
+  },
+  // start a fresh conversation
+  reset: () => sessionStorage.removeItem(THREAD_KEY),
+  menu: (params) => isMock('ai.menu') ? mock(mockMenu(params), 700) : api.post('/ai/menu', params),
   cuisines: knownCuisines,
 }
